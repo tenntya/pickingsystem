@@ -30,3 +30,9 @@ data/sample/
 
 # Sensitive tokens
 GIT.txt
+
+# Local sample datasets
+20251006_163401_*
+*.xlsx
+作成手順.yml
+product_list_table.html
