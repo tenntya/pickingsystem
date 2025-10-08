@@ -256,17 +256,30 @@ def join_and_map(
     parent_index = 1
     sequence_counter = 1
 
+    master_location_column: str | None = None
+    if len(master.columns) > 10:
+        column_name = master.columns[10]
+        if column_name:
+            master_location_column = _clean_column(str(column_name))
+
     for _, record in merged.fillna("").iterrows():
         data = record.to_dict()
         product_code = resolve_field(config, data, "productCode") or normalize_value(data.get(join_key))
         raw_parent_quantity = resolve_field(config, data, "quantity")
         parent_quantity = _display_quantity(raw_parent_quantity)
+        parent_location = ""
+        if master_location_column:
+            parent_location = normalize_value(
+                data.get(master_location_column, "")
+                or data.get(f"{master_location_column}_mst", "")
+            )
+
         parent_row = PickingRow(
             shipDate=resolve_field(config, data, "shipDate"),
             clientCode=resolve_field(config, data, "clientCode"),
             notice=resolve_field(config, data, "notice"),
             productCode=product_code,
-            location=resolve_field(config, data, "location"),
+            location=parent_location,
             quantity=parent_quantity,
             itemType=resolve_field(config, data, "itemType"),
             productName=resolve_field(config, data, "productName"),
@@ -293,10 +306,12 @@ def join_and_map(
                 or resolve_field(config, child_master, "itemType")
                 or parent_row.itemType
             )
-            child_location = (
-                resolve_field(config, child_master, "location")
-                or parent_row.location
-            )
+            child_location = ""
+            if master_location_column:
+                child_location = normalize_value(
+                    child_master.get(master_location_column, "")
+                    or child_master.get(f"{master_location_column}_mst", "")
+                )
             child_notice = (
                 resolve_field(config, child_master, "notice")
                 or parent_row.notice
