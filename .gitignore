@@ -1,0 +1,32 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+
+# Virtual env
+.venv/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Build/dist
+build/
+dist/
+*.egg-info/
+
+# Outputs
+output/
+output/**
+
+# Data inputs/samples (retain structure only)
+data/input/
+data/master/
+data/bom/
+data/sample/
+
+# Local configs
+*.log
+
+# Sensitive tokens
+GIT.txt

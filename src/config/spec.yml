@@ -1,0 +1,37 @@
+spec:
+  name: picking_ticket_pipeline
+  numbering: continuous
+  items_per_page: 6
+join_key: 品目コード
+mapping:
+  shipDate:
+  - 出荷予定日
+  - 出荷期日
+  clientCode: 客先略号
+  notice:
+  - 備考
+  productCode: 品目コード
+  location:
+  - ピッキング可能ロケ地
+  - 代表保管場所
+  - 保管場所
+  quantity: 出荷数量
+  itemType:
+  - 品目種別
+  - 品目種類
+  - 品目タイプ
+  productName:
+  - 品目テキストマスタ
+  - 品目テキストマスター
+  - 品目テキスト
+  orderNumber: 得意先発注番号
+  'no': 連番自動生成
+bom:
+  path: 20251006_163401_製造工程-部品表.txt
+  parent_key: ★◎製造工程品目コード
+  child_key: ★◎製造工程品目コード.1
+  child_name: 製造品目テキスト.1
+  quantity: ★○数量
+  sequence: ★◎明細番号
+  unit: 構成品目数量単位
+  child_type: 調達タイプ

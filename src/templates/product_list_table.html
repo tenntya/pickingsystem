@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>ピッキング票 印刷用</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        html,
+        body {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0;
+            padding: 0;
+            background-color: #ffffff;
+            font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+            font-size: 11px;
+            line-height: 1.25;
+        }
+
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .picking-block {
+            width: 100%;
+            height: 49.5mm;
+            display: flex;
+            page-break-inside: avoid;
+        }
+
+        .block-inner {
+            display: flex;
+            width: 100%;
+            margin: 0 5mm;
+            padding: 4mm 0;
+            gap: 2mm;
+            align-items: stretch;
+        }
+
+        .info-box {
+            flex: 1;
+        }
+
+        table {
+            width: 100%;
+            height: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        td {
+            border: 0.15mm solid #000;
+            padding: 1.2mm 1.1mm;
+            vertical-align: middle;
+            word-break: break-all;
+        }
+
+        .header {
+            font-weight: bold;
+            font-size: 12px;
+            text-align: center;
+            background-color: #f0f0f0;
+        }
+
+        .label {
+            width: 30mm;
+            font-weight: bold;
+            text-align: left;
+            background-color: #f6f6f6;
+        }
+
+        .value {
+            text-align: left;
+        }
+
+        .quantity-cell {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .qr-box {
+            width: 24mm;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2mm;
+            box-sizing: border-box;
+        }
+
+        .qr-box img {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #aaa;
+            font-style: italic;
+            font-size: 10px;
+            flex: 1;
+            border: 0.2mm dashed #ccc;
+        }
+    </style>
+</head>
+<body>
+{% if pages %}
+    {% for page in pages %}
+    <div class="page">
+        {% for row in page %}
+        <div class="picking-block">
+            <div class="block-inner">
+                <div class="info-box">
+                    <table>
+                        <tr>
+                            <td class="header" colspan="4">ピッキング票</td>
+                        </tr>
+                        <tr>
+                            <td class="label">出荷日</td>
+                            <td class="value">{{ row.shipDate }}</td>
+                            <td class="label">客先略号</td>
+                            <td class="value">{{ row.clientCode }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">注意</td>
+                            <td class="value">{{ row.notice }}</td>
+                            <td class="label">品目コード</td>
+                            <td class="value">{{ row.productCode }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">ロケーション</td>
+                            <td class="value">{{ row.location }}</td>
+                            <td class="label">数量</td>
+                            <td class="value quantity-cell">{{ row.quantity }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">品目種別</td>
+                            <td class="value">{{ row.itemType }}</td>
+                            <td class="label">品目名</td>
+                            <td class="value">{{ row.productName }}</td>
+                        </tr>
+                        <tr>
+                            <td class="label">得意先発注番号</td>
+                            <td class="value" colspan="2">{{ row.orderNumber }}</td>
+                            <td class="value" style="text-align: right;">No.{{ row.no }}{% if row.is_child and row.parent_no %} (親: {{ row.parent_no }}){% endif %}</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="qr-box">
+                    {% if row.qr_path %}
+                    <img src="{{ row.qr_path }}" alt="QR">
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="page">
+        <div class="picking-block">
+            <div class="block-inner">
+                <div class="info-box placeholder">データがありません</div>
+                <div class="qr-box"></div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+</body>
+</html>

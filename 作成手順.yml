@@ -1,0 +1,392 @@
+project:
+  name: picking_system
+  language: python
+  package: src
+  python_version: "3.11"
+  style: 
+    lint: ruff
+    format: black
+    typecheck: mypy
+  quality_gate:
+    target_score: "80/100 以上（機能/安定性/可読性/UX の総合）"
+    enforce: true
+    remediation: "不足点を日本語で列挙 → 自動修正 → 再実行を繰り返す"
+
+architecture:
+  ui: "PySide6 (Qt Widgets)"
+  api: "FastAPI (同一プロセス 127.0.0.1)"
+  core: ["pandas", "openpyxl", "jinja2"]
+  pdf: 
+    primary: "wkhtmltopdf"
+    fallback: "Playwright(Chromium)"
+  print:
+    windows: "pywin32(win32print)"
+    linux: "pycups(後日)"
+  settings: "YAML + pydantic-settings"
+  logging: "logging + rich"
+
+data_mapping:
+  join_key: "品目コード"
+  numbering: "Noは連番（ページ跨ぎでも継続）"
+  items_per_page: 6
+  fields:
+    shipDate: ["出荷予定日", "出荷期日"]  # 先勝ちcoalesce
+    clientCode: "客先略号"
+    notice: ""   # 初期は空
+    productCode: "品目コード"
+    location: ["ピッキング可能ロケ地", "代表保管場所（S4データ）", "保管場所"]
+    quantity: "出荷数量"
+    itemType: "品目ﾀｲﾌﾟ"
+    productName: ["品目テキスト(入力)", "品目テキスト(マスタ)"]
+    orderNumber: "得意先発注番号"
+    no: "連番自動生成"
+
+inputs:
+  expected_files:
+    - "出荷計画.xlsx (1行目ヘッダ)"
+    - "品目マスタ.xlsx (1行目ヘッダ)"
+  template_html: "src/templates/product_list_table.html"
+
+deliverables:
+  desktop_app: "PySide6 実行ファイル"
+  html: "output/picking.html"
+  pdf: "output/picking.pdf"
+  print: "プリンタへ送信（選択可）"
+
+tasks:
+  - name: 依存関係と構成生成
+    actions:
+      - create_pyproject_toml: true
+      - pip_install:
+          - PySide6
+          - fastapi
+          - uvicorn
+          - pandas
+          - openpyxl
+          - jinja2
+          - requests
+          - pydantic
+          - pydantic-settings
+          - watchdog
+          - rich
+          - playwright
+          - pywin32
+          - ruff
+          - black
+          - mypy
+          - pytest
+      - playwright_install: ["chromium"]
+      - create_dirs:
+          - src/app_core
+          - src/api
+          - src/ui_desktop
+          - src/templates
+          - src/config
+          - tests
+          - output
+
+  - name: コア実装
+    files:
+      - path: src/app_core/pipeline.py
+        content: |
+          from __future__ import annotations
+          import pandas as pd
+          from dataclasses import dataclass
+
+          ITEMS_PER_PAGE = 6
+
+          @dataclass
+          class PickingRow:
+              shipDate: str
+              clientCode: str
+              notice: str
+              productCode: str
+              location: str
+              quantity: float
+              itemType: str
+              productName: str
+              orderNumber: str
+              no: int
+
+          def load_shipment(path: str) -> pd.DataFrame:
+              return pd.read_excel(path, header=0, dtype=str).fillna("")
+
+          def load_master(path: str) -> pd.DataFrame:
+              return pd.read_excel(path, header=0, dtype=str).fillna("")
+
+          def join_and_map(s: pd.DataFrame, m: pd.DataFrame) -> list[PickingRow]:
+              m2 = m.rename(columns={"品目コード":"item_code"})
+              s2 = s.rename(columns={"品目コード":"item_code"})
+              df = s2.merge(m2, on="item_code", how="left", suffixes=("_in","_mst"))
+              rows: list[PickingRow] = []
+              no = 1
+              for _, r in df.iterrows():
+                  ship_date = r.get("出荷予定日","") or r.get("出荷期日","")
+                  product_name = r.get("品目テキスト_in","") or r.get("品目テキスト","")
+                  location = r.get("ピッキング可能ロケ地","") or r.get("代表保管場所（S4データ）","") or r.get("保管場所","")
+                  qty = r.get("出荷数量","") or "0"
+                  rows.append(PickingRow(
+                      shipDate=str(ship_date),
+                      clientCode=str(r.get("客先略号","")),
+                      notice="",
+                      productCode=str(r.get("item_code","")),
+                      location=str(location),
+                      quantity=float(qty) if str(qty).strip() else 0.0,
+                      itemType=str(r.get("品目ﾀｲﾌﾟ","")),
+                      productName=str(product_name),
+                      orderNumber=str(r.get("得意先発注番号","")),
+                      no=no
+                  ))
+                  no += 1
+              return rows
+
+          def paginate(rows: list[PickingRow]) -> list[list[PickingRow]]:
+              return [rows[i:i+ITEMS_PER_PAGE] for i in range(0, len(rows), ITEMS_PER_PAGE)]
+      - path: src/app_core/report.py
+        content: |
+          from __future__ import annotations
+          from jinja2 import Environment, FileSystemLoader, select_autoescape
+          from pathlib import Path
+          import subprocess, shutil
+
+          def render_html(pages: list[list[dict]], template_dir: str, template_name: str, out_html: str) -> str:
+              env = Environment(loader=FileSystemLoader(template_dir), autoescape=select_autoescape())
+              tmpl = env.get_template(template_name)
+              html = tmpl.render(pickingData=[row for page in pages for row in page])
+              Path(out_html).write_text(html, encoding="utf-8")
+              return out_html
+
+          def html_to_pdf(html_path: str, out_pdf: str) -> str:
+              if shutil.which("wkhtmltopdf"):
+                  subprocess.check_call(["wkhtmltopdf",
+                                         "--margin-top","10mm","--margin-bottom","10mm",
+                                         "--margin-left","10mm","--margin-right","10mm",
+                                         html_path, out_pdf])
+                  return out_pdf
+              # Fallback: Playwright/Chromium
+              from playwright.sync_api import sync_playwright
+              with sync_playwright() as p:
+                  browser = p.chromium.launch()
+                  page = browser.new_page()
+                  page.goto(Path(html_path).resolve().as_uri())
+                  page.pdf(path=out_pdf, margin={"top":"10mm","bottom":"10mm","left":"10mm","right":"10mm"})
+                  browser.close()
+              return out_pdf
+      - path: src/app_core/printing.py
+        content: |
+          import os, win32print, win32api
+
+          def list_printers() -> list[str]:
+              flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
+              return [p[2] for p in win32print.EnumPrinters(flags)]
+
+          def print_pdf(pdf_path: str, printer: str|None=None):
+              if not printer:
+                  printer = win32print.GetDefaultPrinter()
+              acro = r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe"
+              if os.path.exists(acro):
+                  # サイレント印刷（/T）
+                  os.spawnv(os.P_NOWAIT, acro, [acro, "/N", "/T", pdf_path, printer])
+                  return
+              # Fallback: 既定の関連付けで印刷
+              win32api.ShellExecute(0, "print", pdf_path, None, ".", 0)
+
+  - name: API実装
+    files:
+      - path: src/api/server.py
+        content: |
+          from fastapi import FastAPI
+          from pydantic import BaseModel
+          from app_core.pipeline import load_shipment, load_master, join_and_map, paginate
+          from app_core.report import render_html, html_to_pdf
+          from pathlib import Path
+
+          app = FastAPI()
+
+          class RenderReq(BaseModel):
+              shipment_path: str
+              master_path: str
+              template_dir: str
+              template_name: str = "product_list_table.html"
+              out_dir: str
+
+          @app.post("/render")
+          def render(req: RenderReq):
+              s = load_shipment(req.shipment_path)
+              m = load_master(req.master_path)
+              rows = join_and_map(s, m)
+              pages = paginate(rows)
+              out = Path(req.out_dir); out.mkdir(parents=True, exist_ok=True)
+              html = render_html(pages, req.template_dir, req.template_name, str(out/"picking.html"))
+              pdf = html_to_pdf(html, str(out/"picking.pdf"))
+              return {"rows": len(rows), "pages": len(pages), "html": str(html), "pdf": str(pdf)}
+
+  - name: デスクトップUI実装
+    files:
+      - path: src/ui_desktop/main.py
+        content: |
+          from PySide6 import QtWidgets
+          import threading, requests, os
+          from app_core.printing import list_printers, print_pdf
+          import uvicorn, src.api.server as server
+
+          API = "http://127.0.0.1:8765"
+
+          class MainWindow(QtWidgets.QMainWindow):
+              def __init__(self):
+                  super().__init__()
+                  self.setWindowTitle("Picking System")
+                  self.resize(1120, 720)
+
+                  self.ship_edit = QtWidgets.QLineEdit(placeholderText="出荷計画.xlsx")
+                  self.ship_btn = QtWidgets.QPushButton("開く")
+                  self.master_edit = QtWidgets.QLineEdit(placeholderText="品目マスタ.xlsx")
+                  self.master_btn = QtWidgets.QPushButton("開く")
+                  self.out_dir = QtWidgets.QLineEdit(os.path.abspath("./output"))
+                  self.out_btn = QtWidgets.QPushButton("出力先")
+
+                  top = QtWidgets.QHBoxLayout()
+                  for w in (self.ship_edit, self.ship_btn, self.master_edit, self.master_btn, self.out_dir, self.out_btn):
+                      top.addWidget(w)
+
+                  self.render_btn = QtWidgets.QPushButton("PDF生成")
+                  self.print_btn = QtWidgets.QPushButton("印刷")
+                  self.printer_combo = QtWidgets.QComboBox()
+                  self.printer_combo.addItems(list_printers())
+
+                  op = QtWidgets.QHBoxLayout()
+                  op.addWidget(self.render_btn); op.addWidget(self.print_btn)
+                  op.addWidget(QtWidgets.QLabel("プリンタ:")); op.addWidget(self.printer_combo)
+
+                  self.log = QtWidgets.QTextEdit(); self.log.setReadOnly(True)
+                  central = QtWidgets.QWidget(); lay = QtWidgets.QVBoxLayout(central)
+                  lay.addLayout(top); lay.addLayout(op); lay.addWidget(self.log)
+                  self.setCentralWidget(central)
+
+                  self.ship_btn.clicked.connect(lambda: self._pick_file(self.ship_edit))
+                  self.master_btn.clicked.connect(lambda: self._pick_file(self.master_edit))
+                  self.out_btn.clicked.connect(self._pick_dir)
+                  self.render_btn.clicked.connect(self._render)
+                  self.print_btn.clicked.connect(self._print)
+
+              def _pick_file(self, line: QtWidgets.QLineEdit):
+                  path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "ファイルを選択", ".", "Excel (*.xlsx)")
+                  if path: line.setText(path)
+
+              def _pick_dir(self):
+                  path = QtWidgets.QFileDialog.getExistingDirectory(self, "出力先")
+                  if path: self.out_dir.setText(path)
+
+              def _render(self):
+                  def job():
+                      try:
+                          payload = {
+                              "shipment_path": self.ship_edit.text(),
+                              "master_path": self.master_edit.text(),
+                              "template_dir": os.path.abspath("src/templates"),
+                              "out_dir": self.out_dir.text()
+                          }
+                          r = requests.post(API + "/render", json=payload, timeout=600)
+                          r.raise_for_status()
+                          data = r.json()
+                          self._log(f"OK: {data['rows']}行 / {data['pages']}ページ → {data['pdf']}")
+                          self._last_pdf = data["pdf"]
+                      except Exception as e:
+                          self._log(f"ERROR: {e}")
+                  threading.Thread(target=job, daemon=True).start()
+
+              def _print(self):
+                  if getattr(self, "_last_pdf", None):
+                      print_pdf(self._last_pdf, self.printer_combo.currentText())
+                      self._log("印刷ジョブを送信しました。")
+                  else:
+                      self._log("先にPDFを生成してください。")
+
+              def _log(self, msg: str):
+                  self.log.append(msg)
+
+          def start_api():
+              uvicorn.run(server.app, host="127.0.0.1", port=8765, log_level="warning")
+
+          if __name__ == "__main__":
+              t = threading.Thread(target=start_api, daemon=True); t.start()
+              app = QtWidgets.QApplication([])
+              w = MainWindow(); w.show()
+              app.exec()
+
+  - name: テンプレ配置
+    copy:
+      - source: local:/mnt/data/product_list_table.html
+        target: src/templates/product_list_table.html
+
+  - name: 設定/ドキュメント
+    files:
+      - path: src/config/spec.yml
+        content: |
+          spec:
+            name: picking_ticket_pipeline
+            numbering: continuous
+            items_per_page: 6
+          mapping:
+            shipDate: ["出荷予定日","出荷期日"]
+            clientCode: "客先略号"
+            notice: ""
+            productCode: "品目コード"
+            location: ["ピッキング可能ロケ地","代表保管場所（S4データ）","保管場所"]
+            quantity: "出荷数量"
+            itemType: "品目ﾀｲﾌﾟ"
+            productName: ["品目テキスト_in","品目テキスト"]
+            orderNumber: "得意先発注番号"
+      - path: README.md
+        content: |
+          # Picking System (PySide6 + FastAPI)
+          ## セットアップ
+          pip install -r requirements.txt （もしくは pyproject.toml で管理）
+          wkhtmltopdf をインストール（PATHに追加）/ 代替: Playwright(Chromium)
+          ## 起動
+          python src/ui_desktop/main.py
+          ## 使い方
+          - 出荷計画.xlsx と 品目マスタ.xlsx を選択
+          - PDF生成 → 印刷
+          ## 注意
+          - Noは連番、1ページ6行で自動改ページ
+
+  - name: テスト/品質
+    files:
+      - path: tests/test_pipeline.py
+        content: |
+          import pandas as pd
+          from src.app_core.pipeline import join_and_map, paginate, PickingRow
+          def test_paging():
+              s = pd.DataFrame({"品目コード":["A"]*7,"出荷数量":[1]*7,"客先略号":["C"]*7})
+              m = pd.DataFrame({"品目コード":["A"],"品目ﾀｲﾌﾟ":["Z"]})
+              rows = join_and_map(s, m)
+              pages = paginate(rows)
+              assert len(pages) == 2
+              assert rows[0].no == 1 and rows[-1].no == 7
+
+post_generation:
+  interactive_review:
+    language: "ja-JP"
+    checklist:
+      - "出荷計画/マスタ読込〜JOIN〜マッピング〜6件ページング〜HTML/PDF〜印刷が一連で動くか"
+      - "Noがページ跨ぎでも連番になっているか"
+      - "テンプレに正しく差し込まれているか（shipDate/clientCode/.../no）"
+      - "wkhtmltopdf が無い環境で Playwright fallback が機能するか"
+      - "Windowsでプリンタ一覧が取得でき、印刷が完了するか"
+      - "例外時の日本語エラーメッセージと修正提案が出るか"
+      - "コード品質（ruff/black/mypy/pytest）が閾値を満たすか"
+    remediation_policy: "80点未満 → 不足点を日本語で列挙し、自動修正を適用 → テスト再実行 → 繰り返し"
+
+outputs:
+  run_commands:
+    - "python src/ui_desktop/main.py"
+  packaging:
+    pyinstaller:
+      enabled: true
+      entry: "src/ui_desktop/main.py"
+      opts: ["--noconsole","--name","PickingSystem"]
+  success_criteria:
+    - "サンプルXLSXでPDFが生成され、印刷コマンドが通る"
+    - "Noが1..Nで連番、1ページ6行の体裁を維持"
+    - "対話・レビューで指摘があれば日本語で修正案が提示され、修正が反映されること"
