@@ -1,15 +1,22 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
+
 <html lang="ja">
+
 <head>
+
     <meta charset="UTF-8">
+
     <title>ピッキング票 印刷用</title>
+
     <style>
+
         @page {
             size: A4;
             margin: 0;
         }
 
         html,
+
         body {
             width: 210mm;
             min-height: 297mm;
@@ -26,6 +33,7 @@
             min-height: 297mm;
             display: flex;
             flex-direction: column;
+
         }
 
         .picking-block {
@@ -41,7 +49,6 @@
             margin: 0 5mm;
             padding: 4mm 0;
             gap: 2mm;
-            align-items: stretch;
         }
 
         .info-box {
@@ -55,28 +62,52 @@
             table-layout: fixed;
         }
 
+        col.col-small {
+            width: 28mm;
+        }
+
+        col.col-medium {
+            width: 40mm;
+        }
+
+        col.col-qr {
+            width: 24mm;
+        }
+
         td {
             border: 0.15mm solid #000;
-            padding: 1.2mm 1.1mm;
+            padding: 0.7mm 1mm;
             vertical-align: middle;
             word-break: break-all;
+            box-sizing: border-box;
         }
 
         .header {
             font-weight: bold;
-            font-size: 12px;
+            font-size: 13px;
             text-align: center;
             background-color: #f0f0f0;
         }
 
-        .label {
-            width: 30mm;
+        .label-cell {
             font-weight: bold;
-            text-align: left;
+            text-align: center;
             background-color: #f6f6f6;
+            white-space: nowrap;
         }
 
-        .value {
+        .notice-cell {
+            align-items: center;
+            gap: 0.8mm;
+            text-align: left;
+        }
+
+        .notice-label {
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .value-cell {
             text-align: left;
         }
 
@@ -85,22 +116,50 @@
             white-space: nowrap;
         }
 
-        .qr-box {
-            width: 24mm;
-            display: flex;
+        .number-cell {
+            white-space: nowrap;
+        }
+        .location-cell {
             align-items: center;
             justify-content: center;
-            padding: 2mm;
+            text-align: center;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.15;
+            word-break: break-word;
+        }
+
+        .check-cell {
+            align-items: center;
+            justify-content: flex-start;
+            gap: 0.8mm;
+            white-space: nowrap;
+        }
+
+        .check-label {
+            line-height: 1.1;
+        }
+
+        .qr-cell {
+            text-align: center;
+            white-space: nowrap;
+            padding: 0;
+        }
+
+        .qr-cell img {
+            width: 8mm;
+            height: 8mm;
+            object-fit: contain;
+        }
+        .checkbox {
+            display: inline-block;
+            width: 5mm;
+            height: 5mm;
+            border: 0.2mm solid #000;
             box-sizing: border-box;
         }
 
-        .qr-box img {
-            max-width: 100%;
-            max-height: 100%;
-        }
-
         .placeholder {
-            display: flex;
             align-items: center;
             justify-content: center;
             color: #aaa;
@@ -109,10 +168,15 @@
             flex: 1;
             border: 0.2mm dashed #ccc;
         }
+
     </style>
+
 </head>
+
 <body>
+
 {% if pages %}
+
     {% for page in pages %}
     <div class="page">
         {% for row in page %}
@@ -120,44 +184,49 @@
             <div class="block-inner">
                 <div class="info-box">
                     <table>
+                        <colgroup>
+                            <col class="col-small">
+                            <col class="col-small">
+                            <col class="col-medium">
+                            <col class="col-medium">
+                            <col class="col-qr">
+                        </colgroup>
+
                         <tr>
-                            <td class="header" colspan="4">ピッキング票</td>
+                            <td class="header" colspan="5">ピッキング票</td>
                         </tr>
+
                         <tr>
-                            <td class="label">出荷日</td>
-                            <td class="value">{{ row.shipDate }}</td>
-                            <td class="label">客先略号</td>
-                            <td class="value">{{ row.clientCode }}</td>
+                            <td class="label-cell">出荷日</td>
+                            <td class="label-cell">客先略称</td>
+                            <td class="label-cell">注意</td>
+                            <td class="notice-cell">{{ row.notice or '' }}</td>
+                            <td class="label-cell">ロケ地</td>
                         </tr>
+
                         <tr>
-                            <td class="label">注意</td>
-                            <td class="value">{{ row.notice }}</td>
-                            <td class="label">品目コード</td>
-                            <td class="value">{{ row.productCode }}</td>
+                            <td class="value-cell">{{ row.shipDate or '' }}</td>
+                            <td class="value-cell">{{ row.clientCode or '' }}</td>
+                            <td class="label-cell">品目コード</td>
+                            <td class="value-cell">{{ row.productCode or '' }}</td>
+                            <td class="location-cell" rowspan="2">{{ row.location or '' }}</td>
                         </tr>
+
                         <tr>
-                            <td class="label">ロケーション</td>
-                            <td class="value">{{ row.location }}</td>
-                            <td class="label">数量</td>
-                            <td class="value quantity-cell">{{ row.quantity }}</td>
+                            <td class="label-cell">数量</td>
+                            <td class="value-cell quantity-cell">{{ row.quantity or '' }}</td>
+                            <td class="label-cell">品目名</td>
+                            <td class="value-cell">{{ row.productName or '' }}</td>
                         </tr>
+
                         <tr>
-                            <td class="label">品目種別</td>
-                            <td class="value">{{ row.itemType }}</td>
-                            <td class="label">品目名</td>
-                            <td class="value">{{ row.productName }}</td>
-                        </tr>
-                        <tr>
-                            <td class="label">得意先発注番号</td>
-                            <td class="value" colspan="2">{{ row.orderNumber }}</td>
-                            <td class="value" style="text-align: right;">No.{{ row.no }}{% if row.is_child and row.parent_no %} (親: {{ row.parent_no }}){% endif %}</td>
+                            <td class="value-cell number-cell">No.{{ row.no }}{% if row.is_child and row.parent_no %} (親: {{ row.parent_no }}){% endif %}</td>
+                            <td class="label-cell">得意先発注番号</td>
+                            <td class="value-cell">{{ row.orderNumber or '' }}</td>
+                            <td class="check-cell"><span class="checkbox"></span><span class="check-label">数量チェック</span></td>
+                            <td class="qr-cell">{% if row.qr_path %}<img src="{{ row.qr_path }}" alt="QR">{% endif %}</td>
                         </tr>
                     </table>
-                </div>
-                <div class="qr-box">
-                    {% if row.qr_path %}
-                    <img src="{{ row.qr_path }}" alt="QR">
-                    {% endif %}
                 </div>
             </div>
         </div>
@@ -169,10 +238,10 @@
         <div class="picking-block">
             <div class="block-inner">
                 <div class="info-box placeholder">データがありません</div>
-                <div class="qr-box"></div>
             </div>
         </div>
     </div>
 {% endif %}
 </body>
 </html>
+
