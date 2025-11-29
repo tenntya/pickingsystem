@@ -43,6 +43,7 @@ class PickingRow:
     child_index: int | None = None
     quantity_note: str = ""
     unit: str = ""
+    parent_total: int = 0
 
 
 def _clean_column(name: str) -> str:
@@ -234,6 +235,38 @@ def build_bom_lookup(data: pd.DataFrame, config: BomConfig) -> BomLookup:
     return lookup
 
 
+EXCLUDE_F_COLUMN_KEYWORDS = ("モータ組立品", "減速機組立品")
+
+
+def filter_shipment_rows(shipment: pd.DataFrame) -> pd.DataFrame:
+    """Remove rows whose F-column contains disallowed keywords."""
+    if shipment.empty:
+        return shipment
+    column_index = 5  # F column (0-based index)
+    if shipment.shape[1] <= column_index:
+        return shipment
+    pattern = "|".join(re.escape(unicodedata.normalize("NFKC", keyword)) for keyword in EXCLUDE_F_COLUMN_KEYWORDS)
+    target = shipment.iloc[:, column_index].astype(str).map(lambda x: unicodedata.normalize("NFKC", x).strip())
+    mask = ~target.str.contains(pattern, na=False, regex=True)
+    return shipment.loc[mask].reset_index(drop=True)
+
+
+def sort_shipment_rows(shipment: pd.DataFrame) -> pd.DataFrame:
+    """Sort by 12th then 13th column before processing."""
+    if shipment.empty:
+        return shipment
+    first_idx, second_idx = 11, 12
+    if shipment.shape[1] <= first_idx:
+        return shipment
+
+    columns = list(shipment.columns)
+    sort_keys = [columns[first_idx]]
+    if len(columns) > second_idx:
+        sort_keys.append(columns[second_idx])
+
+    return shipment.sort_values(by=sort_keys, kind="mergesort").reset_index(drop=True)
+
+
 def join_and_map(
     shipment: pd.DataFrame,
     master: pd.DataFrame,
@@ -262,13 +295,85 @@ def join_and_map(
         if column_name:
             master_location_column = _clean_column(str(column_name))
 
+    def _append_children(
+        parent_row: PickingRow,
+        parent_quantity_value: str,
+        index_prefix: list[str],
+        parent_code_key: str,
+        path: tuple[str, ...],
+    ) -> None:
+        nonlocal sequence_counter
+
+        if not parent_code_key:
+            return
+
+        children = lookup.get(parent_code_key, [])
+        if not children:
+            return
+
+        for child_idx, child in enumerate(children, start=1):
+            child_code_raw = normalize_value(child.get("productCode", ""))
+            child_code_key = _normalize_code_value(child_code_raw)
+            child_master = master_lookup.get(child_code_key, {})
+            child_product_name = (
+                child.get("productName", "")
+                or resolve_field(config, child_master, "productName")
+                or child_code_raw
+            )
+            child_item_type = (
+                child.get("itemType", "")
+                or resolve_field(config, child_master, "itemType")
+                or parent_row.itemType
+            )
+            child_location = resolve_field(config, child_master, "location")
+            if not child_location and master_location_column:
+                child_location = normalize_value(
+                    child_master.get(master_location_column, "")
+                    or child_master.get(f"{master_location_column}_mst", "")
+                )
+            child_notice = resolve_field(config, child_master, "notice") or parent_row.notice
+            result_qty, note = _compute_child_quantity(
+                parent_quantity_value, child.get("baseQuantity", "")
+            )
+            child_no = "-".join(index_prefix + [str(child_idx)])
+            child_row = PickingRow(
+                shipDate=parent_row.shipDate,
+                clientCode=parent_row.clientCode,
+                notice=child_notice,
+                productCode=child_code_raw,
+                location=child_location,
+                quantity=_display_quantity(result_qty),
+                itemType=child_item_type,
+                productName=child_product_name,
+                orderNumber=parent_row.orderNumber,
+                no=child_no,
+                sequence=sequence_counter,
+                qr_path="",
+                is_child=True,
+                parent_no=parent_row.no,
+                child_index=child_idx,
+                quantity_note=note,
+                unit=child.get("unit", ""),
+            )
+            rows.append(child_row)
+            sequence_counter += 1
+
+            if child_code_key and child_code_key not in path:
+                _append_children(
+                    child_row,
+                    child_row.quantity,
+                    index_prefix + [str(child_idx)],
+                    child_code_key,
+                    path + (child_code_key,),
+                )
+
     for _, record in merged.fillna("").iterrows():
         data = record.to_dict()
         product_code = resolve_field(config, data, "productCode") or normalize_value(data.get(join_key))
         raw_parent_quantity = resolve_field(config, data, "quantity")
         parent_quantity = _display_quantity(raw_parent_quantity)
-        parent_location = ""
-        if master_location_column:
+        parent_location = resolve_field(config, data, "location")
+        if not parent_location and master_location_column:
             parent_location = normalize_value(
                 data.get(master_location_column, "")
                 or data.get(f"{master_location_column}_mst", "")
@@ -291,58 +396,19 @@ def join_and_map(
         sequence_counter += 1
 
         parent_code_key = _normalize_code_value(parent_row.productCode)
-        children = lookup.get(parent_code_key, [])
-        for child_idx, child in enumerate(children, start=1):
-            child_code_raw = normalize_value(child.get("productCode", ""))
-            child_code_key = _normalize_code_value(child_code_raw)
-            child_master = master_lookup.get(child_code_key, {})
-            child_product_name = (
-                child.get("productName", "")
-                or resolve_field(config, child_master, "productName")
-                or child_code_raw
+        if parent_code_key:
+            _append_children(
+                parent_row,
+                parent_row.quantity,
+                parent_row.no.split("-"),
+                parent_code_key,
+                (parent_code_key,),
             )
-            child_item_type = (
-                child.get("itemType", "")
-                or resolve_field(config, child_master, "itemType")
-                or parent_row.itemType
-            )
-            child_location = ""
-            if master_location_column:
-                child_location = normalize_value(
-                    child_master.get(master_location_column, "")
-                    or child_master.get(f"{master_location_column}_mst", "")
-                )
-            child_notice = (
-                resolve_field(config, child_master, "notice")
-                or parent_row.notice
-            )
-            result_qty, note = _compute_child_quantity(
-                parent_quantity, child.get("baseQuantity", "")
-            )
-            child_row = PickingRow(
-                shipDate=parent_row.shipDate,
-                clientCode=parent_row.clientCode,
-                notice=child_notice,
-                productCode=child_code_raw,
-                location=child_location,
-                quantity=_display_quantity(result_qty),
-                itemType=child_item_type,
-                productName=child_product_name,
-                orderNumber=parent_row.orderNumber,
-                no=f"{parent_index}-{child_idx}",
-                sequence=sequence_counter,
-                qr_path="",
-                is_child=True,
-                parent_no=parent_row.no,
-                child_index=child_idx,
-                quantity_note=note,
-                unit=child.get("unit", ""),
-            )
-            rows.append(child_row)
-            sequence_counter += 1
 
         parent_index += 1
-
+    total_parents = parent_index - 1
+    for row in rows:
+        row.parent_total = total_parents
     return rows
 
 def paginate(rows: Sequence[PickingRow], per_page: int) -> list[list[PickingRow]]:
@@ -388,6 +454,8 @@ def run_pipeline(
 ) -> PipelineResult:
     config: LoadedConfig = load_config(config_path)
     shipment_df = load_excel(shipment_path, config=config.data)
+    shipment_df = filter_shipment_rows(shipment_df)
+    shipment_df = sort_shipment_rows(shipment_df)
     master_df = load_excel(master_path, config=config.data)
 
     bom_lookup: BomLookup | None = None
@@ -444,6 +512,7 @@ __all__ = [
     "PickingRow",
     "PipelineResult",
     "build_bom_lookup",
+    "filter_shipment_rows",
     "join_and_map",
     "load_bom",
     "load_excel",
