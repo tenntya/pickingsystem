@@ -1,7 +1,7 @@
 import pandas as pd
 
 from src.app_core.config import load_config
-from src.app_core.pipeline import build_bom_lookup, join_and_map, paginate
+from src.app_core.pipeline import build_bom_lookup, filter_shipment_rows, join_and_map, paginate
 
 
 def test_paginate_and_numbering():
@@ -101,3 +101,76 @@ def test_join_and_map_with_bom_children():
     assert child_two.itemType == "子部品"
     assert child_two.location == "LOC-CH2"
     assert child_two.sequence == 3
+
+
+def test_join_and_map_with_nested_bom():
+    shipment = pd.DataFrame(
+        {
+            "品目コード": ["A"],
+            "出荷数量": [2],
+            "客先略号": ["CUST"],
+            "出荷予定日": ["2025-10-01"],
+            "保管場所": ["LOC"],
+        }
+    )
+    master = pd.DataFrame(
+        {
+            "品目コード": ["A", "COMP-1", "PART-1"],
+            "品目テキストマスタ": ["完成品", "子部品1", "孫部品"],
+            "品目種別": ["完成品", "子部品", "孫部品"],
+            "得意先発注番号": ["ORD-001", "", ""],
+            "備考": ["指示あり", "", ""],
+            "ピッキング可能ロケ地": ["LOC-PARENT", "LOC-CH1", "LOC-GCH1"],
+        }
+    )
+
+    bom_df = pd.DataFrame(
+        {
+            "★◎製造工程品目コード": ["A", "COMP-1"],
+            "★◎明細番号": ["10", "10"],
+            "★◎製造工程品目コード.1": ["COMP-1", "PART-1"],
+            "製造品目テキスト.1": ["部品1", "孫部品"],
+            "★○数量": ["3", "2"],
+            "構成品目数量単位": ["PC", "PC"],
+            "調達タイプ": ["子部品", ""],
+        }
+    )
+
+    config = load_config().data
+    assert config.bom is not None
+    bom_lookup = build_bom_lookup(bom_df, config.bom)
+
+    rows = join_and_map(shipment, master, config, bom_lookup=bom_lookup)
+    assert len(rows) == 3
+
+    parent, child, grandchild = rows
+
+    assert parent.no == "1"
+    assert child.no == "1-1"
+    assert child.quantity == "6"
+    assert child.sequence == 2
+
+    assert grandchild.no == "1-1-1"
+    assert grandchild.parent_no == "1-1"
+    assert grandchild.quantity == "12"
+    assert grandchild.quantity_note == "6 × 2"
+    assert grandchild.location == "LOC-GCH1"
+    assert grandchild.is_child is True
+    assert grandchild.sequence == 3
+
+
+def test_filter_shipment_rows_excludes_motor_and_reducer():
+    df = pd.DataFrame(
+        {
+            "A": [1, 2, 3, 4],
+            "B": ["b"] * 4,
+            "C": ["c"] * 4,
+            "D": ["d"] * 4,
+            "E": ["e"] * 4,
+            "F": ["通常品", "モーター組立品", "減速機組立品", "ﾓｰﾀｰ組立品"],
+            "品目コード": ["X1", "X2", "X3", "X4"],
+        }
+    )
+    filtered = filter_shipment_rows(df)
+    assert len(filtered) == 1
+    assert list(filtered["F"]) == ["通常品"]

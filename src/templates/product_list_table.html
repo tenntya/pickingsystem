@@ -13,6 +13,7 @@
         @page {
             size: A4;
             margin: 0;
+            padding: 0;
         }
 
         html,
@@ -29,8 +30,10 @@
         }
 
         .page {
-            width: 210mm;
+            width: 214mm;
             min-height: 297mm;
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
 
@@ -38,7 +41,7 @@
 
         .picking-block {
             width: 100%;
-            height: 49.5mm;
+            height: 50mm;
             display: flex;
             page-break-inside: avoid;
         }
@@ -46,8 +49,8 @@
         .block-inner {
             display: flex;
             width: 100%;
-            margin: 0 5mm;
-            padding: 4mm 0;
+            margin: 0.5mm;
+            padding: 4mm 0 4mm 0;
             gap: 2mm;
         }
 
@@ -63,15 +66,27 @@
         }
 
         col.col-small {
-            width: 28mm;
+            width: 20mm;
         }
+        
+        col.col-small2 {
+            width: 30mm;
+        }
+        
+        col.col-small3 {
+        width: 25mm;
+        }        
 
         col.col-medium {
             width: 40mm;
         }
+        
+        col.col-medium2 {
+            width: 80mm;
+        }
 
         col.col-qr {
-            width: 24mm;
+            width: 20mm;
         }
 
         td {
@@ -84,14 +99,13 @@
 
         .header {
             font-weight: bold;
-            font-size: 13px;
+            font-size: 10px;
             text-align: center;
             background-color: #f0f0f0;
         }
 
         .label-cell {
-            font-weight: bold;
-            text-align: center;
+            text-align: left;
             background-color: #f6f6f6;
             white-space: nowrap;
         }
@@ -100,20 +114,32 @@
             align-items: center;
             gap: 0.8mm;
             text-align: left;
+            color: red;
         }
 
         .notice-label {
             font-weight: bold;
             white-space: nowrap;
         }
-
+        
         .value-cell {
             text-align: left;
+            
         }
 
+        .value-cell2 {
+            text-align: left;
+            font-size: 21px;
+            font-weight: bolder;
+            
+        }
+
+
         .quantity-cell {
-            text-align: right;
+            text-align: left;
             white-space: nowrap;
+            font-size: 21px;
+            font-weight: bolder;
         }
 
         .number-cell {
@@ -147,8 +173,8 @@
         }
 
         .qr-cell img {
-            width: 8mm;
-            height: 8mm;
+            width: 14mm;
+            height: 14mm;
             object-fit: contain;
         }
         .checkbox {
@@ -185,15 +211,16 @@
                 <div class="info-box">
                     <table>
                         <colgroup>
-                            <col class="col-small">
-                            <col class="col-small">
-                            <col class="col-medium">
-                            <col class="col-medium">
+                            <col class="col-small2">
+                            <col class="col-small3">
+                            <col class="col-small2">
+                            <col class="col-medium2">
+                            <col class="col-small3">
                             <col class="col-qr">
-                        </colgroup>
-
+                        </colgroup>  
+                        
                         <tr>
-                            <td class="header" colspan="5">ピッキング票</td>
+                            <td class="header" colspan="6">ピッキング票</td>
                         </tr>
 
                         <tr>
@@ -202,29 +229,31 @@
                             <td class="label-cell">注意</td>
                             <td class="notice-cell">{{ row.notice or '' }}</td>
                             <td class="label-cell">ロケ地</td>
+                            <td class="label-cell">QRコード</td>
                         </tr>
-
+                        
                         <tr>
                             <td class="value-cell">{{ row.shipDate or '' }}</td>
                             <td class="value-cell">{{ row.clientCode or '' }}</td>
                             <td class="label-cell">品目コード</td>
-                            <td class="value-cell">{{ row.productCode or '' }}</td>
-                            <td class="location-cell" rowspan="2">{{ row.location or '' }}</td>
+                            <td class="value-cell2">{{ row.productCode or '' }}</td>
+                            <td class="location-cell" rowspan="3">{{ row.location or '' }}</td>
+                            <td class="qr-cell" rowspan="3">{% if row.qr_path %}<img src="{{ row.qr_path }}" alt="QR">{% endif %}</td>
                         </tr>
 
                         <tr>
                             <td class="label-cell">数量</td>
                             <td class="value-cell quantity-cell">{{ row.quantity or '' }}</td>
                             <td class="label-cell">品目名</td>
-                            <td class="value-cell">{{ row.productName or '' }}</td>
+                            <td class="value-cell2">{{ row.productName or '' }}</td>
                         </tr>
 
                         <tr>
-                            <td class="value-cell number-cell">No.{{ row.no }}{% if row.is_child and row.parent_no %} (親: {{ row.parent_no }}){% endif %}</td>
+                            <td class="value-cell number-cell">No.{{ row.no }}{% if not row.is_child and row.parent_total %}/{{ row.parent_total }}{% endif %}{% if row.is_child and row.parent_no %} (親: {{ row.parent_no }}){% endif %}</td>
+                            <td class="check-cell"><span class="checkbox"></span><span class="check-label">数量チェック</span></td>
                             <td class="label-cell">得意先発注番号</td>
                             <td class="value-cell">{{ row.orderNumber or '' }}</td>
-                            <td class="check-cell"><span class="checkbox"></span><span class="check-label">数量チェック</span></td>
-                            <td class="qr-cell">{% if row.qr_path %}<img src="{{ row.qr_path }}" alt="QR">{% endif %}</td>
+
                         </tr>
                     </table>
                 </div>

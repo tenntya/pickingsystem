@@ -5,29 +5,25 @@ spec:
 join_key: 品目コード
 mapping:
   shipDate:
-  - 出荷予定日
-  - 出荷期日
+    - 出荷予定日
+    - 出荷期日
   clientCode: 客先略号
   notice:
-  - 備考
+    - 備考
   productCode: 品目コード
   location:
-  - ピッキング可能ロケ地
-  - 代表保管場所
-  - 保管場所
+    - ピッキング可能ロケ地
+    - 代表保管場所
+    - 保管場所
   quantity: 出荷数量
   itemType:
-  - 品目種別
-  - 品目種類
-  - 品目タイプ
+    - 品目種別
   productName:
-  - 品目テキストマスタ
-  - 品目テキストマスター
-  - 品目テキスト
+    - 品目テキストマスタ
   orderNumber: 得意先発注番号
-  'no': 連番自動生成
+  "no": 連番自動生成
 bom:
-  path: 20251006_163401_製造工程-部品表.txt
+  path: null
   parent_key: ★◎製造工程品目コード
   child_key: ★◎製造工程品目コード.1
   child_name: 製造品目テキスト.1

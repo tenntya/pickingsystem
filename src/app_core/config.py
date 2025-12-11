@@ -9,12 +9,16 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class SpecModel(BaseModel):
+    """印刷仕様の設定"""
+
     name: str
     numbering: str = Field(default="continuous")
     items_per_page: int = Field(default=6, ge=1)
 
 
 class BomConfig(BaseModel):
+    """BOM (部品表) の列マッピング設定"""
+
     path: str | None = None
     parent_key: str = "★◎製造工程品目コード"
     child_key: str = "★◎製造工程品目コード.1"
@@ -25,6 +29,7 @@ class BomConfig(BaseModel):
     child_type: str | None = "調達タイプ"
 
     def resolve_path(self, base: Path) -> Path | None:
+        """相対パスの場合は base を基準に解決する"""
         if not self.path:
             return None
         candidate = Path(self.path)
@@ -34,6 +39,8 @@ class BomConfig(BaseModel):
 
 
 class PipelineConfig(BaseModel):
+    """パイプライン全体の設定"""
+
     spec: SpecModel
     join_key: str = Field(alias="join_key")
     mapping: dict[str, list[str]] = Field(default_factory=dict)
@@ -42,6 +49,7 @@ class PipelineConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_mapping(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """mapping 値をリスト形式にそろえる"""
         mapping: dict[str, Any] = values.get("mapping", {})
         normalized: dict[str, list[str]] = {}
         for key, raw in mapping.items():
@@ -54,22 +62,17 @@ class PipelineConfig(BaseModel):
         values["mapping"] = normalized
         return values
 
-    def resolve(self, row: dict[str, Any], field: str, default: str = "") -> str:
-        keys = self.mapping.get(field, [])
-        for key in keys:
-            value = row.get(key)
-            if value not in (None, ""):
-                return str(value)
-        return default
-
 
 @dataclass(slots=True)
 class LoadedConfig:
+    """読み込んだ設定ファイルと内容"""
+
     source: Path
     data: PipelineConfig
 
 
 def load_config(path: str | Path = "src/config/spec.yml") -> LoadedConfig:
+    """YAML 設定ファイルを読み込む"""
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(f"設定ファイルが見つかりません: {config_path}")
